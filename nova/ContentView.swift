@@ -22,6 +22,9 @@ struct ContentView: View {
         .background(Color(nsColor: .textBackgroundColor))
         // Attach the window accessor invisibly so it doesn't affect layout
         .background(WindowAccessor().frame(width: 0, height: 0))
+        .onAppear {
+            (NSApp.delegate as? AppDelegate)?.sharedViewModel = vm
+        }
     }
 
     private var header: some View {
@@ -114,26 +117,48 @@ struct ContentView: View {
                 .padding(.horizontal, 4)
             }
             HStack(alignment: .center, spacing: 8) {
-            ChatInputTextView(text: $vm.input, isEnabled: !vm.isStreaming) {
-                Task { await vm.send() }
-            }
-            .frame(minHeight: 24, maxHeight: 80)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.gray.opacity(0.25))
-            )
-            // Do not use SwiftUI .disabled on NSViewRepresentable text view; manage editability internally
+                ChatInputTextView(text: $vm.input, isEnabled: !vm.isStreaming) {
+                    Task { await vm.send() }
+                }
+                .frame(minHeight: 24, maxHeight: 80)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.gray.opacity(0.25))
+                )
+                // Do not use SwiftUI .disabled on NSViewRepresentable text view; manage editability internally
+                .overlay(alignment: .leading) {
+                    if let partial = vm.partialTranscript, vm.isListening && vm.input.isEmpty {
+                        Text(partial)
+                            .foregroundStyle(.secondary)
+                            .font(.body)
+                            .lineLimit(2)
+                            .padding(.leading, 10)
+                            .padding(.vertical, 6)
+                            .allowsHitTesting(false)
+                    }
+                }
 
-            Button(action: { Task { await vm.send() } }) {
-                Image(systemName: "paperplane.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 28, height: 28)
-                    .background(Circle().fill(vm.isStreaming || vm.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.gray.opacity(0.5) : Color.accentColor))
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut(.return, modifiers: [.command])
-            .disabled(vm.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vm.isStreaming)
+                // Mic button
+                Button(action: { vm.toggleMic() }) {
+                    Image(systemName: vm.isListening ? "mic.fill" : "mic")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(vm.isListening ? Color.red.opacity(0.9) : Color.accentColor))
+                }
+                .buttonStyle(.plain)
+                .help(vm.isListening ? "Stop voice input" : "Start voice input")
+
+                Button(action: { Task { await vm.send() } }) {
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(vm.isStreaming || vm.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.gray.opacity(0.5) : Color.accentColor))
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.return, modifiers: [.command])
+                .disabled(vm.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vm.isStreaming)
             }
         }
         .padding(10)

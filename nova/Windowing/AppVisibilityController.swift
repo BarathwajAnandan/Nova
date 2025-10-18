@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 
+@MainActor
 final class AppVisibilityController {
     static let shared = AppVisibilityController()
 
@@ -29,7 +30,10 @@ final class AppVisibilityController {
 
     func ensureIconWindow() {
         if iconWC == nil {
+            let vm = (NSApp.delegate as? AppDelegate)?.sharedViewModel ?? ChatViewModel()
+
             iconWC = FloatingIconWindowController(
+                viewModel: vm,
                 onClick: { [weak self] in self?.toggle() },
                 onDragChanged: { [weak self] translation in
                     self?.iconWC?.beginDragIfNeeded()

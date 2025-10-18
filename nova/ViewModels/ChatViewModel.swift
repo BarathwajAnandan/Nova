@@ -7,6 +7,8 @@
 
 import Foundation
 import AppKit
+import Speech
+import AVFoundation
 
 @MainActor
 final class ChatViewModel: ObservableObject {
@@ -18,9 +20,12 @@ final class ChatViewModel: ObservableObject {
     @Published var recognizedApp: RecognizedApp?
     @Published var pendingContext: String?
     @Published var screenshot: NSImage?
+    @Published var isListening: Bool = false
+    @Published var partialTranscript: String?
 
     private let client = GeminiClient()
     private let capturer = AccessibilityCaptureService()
+    private let speech = SpeechRecognitionService()
 
     init() {
         // Optional: seed a greeting
@@ -49,6 +54,7 @@ final class ChatViewModel: ObservableObject {
                 }
             }
         }
+        speech.delegate = self
     }
 
     func loadApiKeyExists() -> Bool {
@@ -92,6 +98,48 @@ final class ChatViewModel: ObservableObject {
             errorMessage = (error as NSError).localizedDescription
         }
         isStreaming = false
+    }
+
+    func sendTranscribedText(_ text: String) async {
+        guard text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false, isStreaming == false else { return }
+        input = text
+        await send()
+    }
+
+    func toggleMic() {
+        if isListening { stopListening(commitPartial: true, send: false) } else { startListening() }
+    }
+
+    private func startListening() {
+        speech.requestAuthorization { [weak self] granted in
+            guard let self else { return }
+            if granted == false {
+                self.errorMessage = "Microphone/Speech permission required in System Settings."
+                return
+            }
+            do {
+                try self.speech.start()
+                self.isListening = true
+            } catch {
+                self.errorMessage = (error as NSError).localizedDescription
+            }
+        }
+    }
+
+    private func stopListening(commitPartial: Bool = false, send: Bool = false) {
+        speech.stop()
+        if commitPartial {
+            let text = partialTranscript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if text.isEmpty == false {
+                if send {
+                    Task { await sendTranscribedText(text) }
+                } else {
+                    input = text
+                }
+            }
+        }
+        isListening = false
+        partialTranscript = nil
     }
 
     func setAutoCapture(_ enabled: Bool) {
@@ -154,6 +202,29 @@ final class ChatViewModel: ObservableObject {
     private func toJPEGData(_ image: NSImage, quality: Double = 0.9) -> Data? {
         guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
         return bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality])
+    }
+}
+
+// MARK: - SpeechRecognitionServiceDelegate
+extension ChatViewModel: SpeechRecognitionServiceDelegate {
+    func speechService(_ svc: SpeechRecognitionService, didUpdatePartial text: String) {
+        partialTranscript = text
+    }
+
+    func speechService(_ svc: SpeechRecognitionService, didFinishWith text: String) {
+        isListening = false
+        partialTranscript = nil
+        Task { await sendTranscribedText(text) }
+    }
+
+    func speechService(_ svc: SpeechRecognitionService, didFail error: Error) {
+        isListening = false
+        partialTranscript = nil
+        errorMessage = (error as NSError).localizedDescription
+    }
+
+    func speechServiceDidChangeState(_ svc: SpeechRecognitionService, isRunning: Bool) {
+        isListening = isRunning
     }
 }
 

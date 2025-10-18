@@ -31,14 +31,16 @@ final class FloatingIconPanel: NSPanel {
 final class FloatingIconWindowController: NSWindowController {
     private var initialOrigin: NSPoint?
 
-    init(onClick: @escaping () -> Void,
+    init(viewModel: ChatViewModel,
+         onClick: @escaping () -> Void,
          onDragChanged: @escaping (CGSize) -> Void,
          onDragEnded: @escaping () -> Void) {
-        let hosting = NSHostingView(rootView: SparklesIconView(
+        let root = SparklesIconView(
             onClick: onClick,
             onDragChanged: onDragChanged,
             onDragEnded: onDragEnded
-        ))
+        ).environmentObject(viewModel)
+        let hosting = NSHostingView(rootView: root)
         let panel = FloatingIconPanel(contentView: hosting)
         super.init(window: panel)
         shouldCascadeWindows = false
