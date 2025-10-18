@@ -39,7 +39,15 @@ final class ChatViewModel: ObservableObject {
         }
 
         capturer.onScreenshot = { [weak self] image in
-            self?.screenshot = image
+            guard let self else { return }
+            self.screenshot = image
+            DispatchQueue.global(qos: .utility).async {
+                if let url = self.saveScreenshotToDisk(image: image) {
+                    print("Screenshot saved at: \(url.path)")
+                } else {
+                    print("Failed to save screenshot to disk")
+                }
+            }
         }
     }
 
@@ -106,6 +114,33 @@ final class ChatViewModel: ObservableObject {
 
     func clearPendingContext() {
         pendingContext = nil
+    }
+
+    // MARK: - Screenshot saving
+    private func saveScreenshotToDisk(image: NSImage) -> URL? {
+        guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
+        guard let png = bitmap.representation(using: .png, properties: [:]) else { return nil }
+
+        let fm = FileManager.default
+        let picturesDir = (fm.urls(for: .picturesDirectory, in: .userDomainMask).first ?? fm.temporaryDirectory)
+        let targetDir = picturesDir.appendingPathComponent("Nova", isDirectory: true)
+        do {
+            try fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
+        } catch {
+            // Fallback to temporary directory if we cannot create Pictures/Nova
+            let tempURL = fm.temporaryDirectory.appendingPathComponent("nova_screenshot_\(Int(Date().timeIntervalSince1970)).png")
+            do { try png.write(to: tempURL) } catch { return nil }
+            return tempURL
+        }
+
+        let filename = "screenshot_\(Int(Date().timeIntervalSince1970)).png"
+        let fileURL = targetDir.appendingPathComponent(filename)
+        do {
+            try png.write(to: fileURL)
+            return fileURL
+        } catch {
+            return nil
+        }
     }
 }
 
