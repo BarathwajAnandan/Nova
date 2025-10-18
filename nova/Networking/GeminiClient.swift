@@ -24,7 +24,7 @@ final class GeminiClient {
     private let model = "gemini-2.5-flash"
     private let base = URL(string: "https://generativelanguage.googleapis.com/v1beta/")!
 
-    func streamResponse(history: [Message]) async throws -> AsyncStream<String> {
+    func streamResponse(history: [Message], hiddenContext: String?) async throws -> AsyncStream<String> {
         guard let apiKey = try KeychainService.shared.readApiKey(), apiKey.isEmpty == false else {
             throw NSError(domain: "GeminiClient", code: 401, userInfo: [NSLocalizedDescriptionKey: "API key not set. Open Settings to add your key."])
         }
@@ -41,7 +41,7 @@ final class GeminiClient {
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 60
 
-        let body = try makeBody(history: history)
+        let body = try makeBody(history: history, hiddenContext: hiddenContext)
         request.httpBody = body
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
@@ -73,13 +73,22 @@ final class GeminiClient {
         }
     }
 
-    private func makeBody(history: [Message]) throws -> Data {
+    private func makeBody(history: [Message], hiddenContext: String?) throws -> Data {
         struct Part: Encodable { let text: String }
         struct Content: Encodable { let role: String; let parts: [Part] }
         struct Payload: Encodable { let contents: [Content] }
 
-        let contents: [Content] = history.map { msg in
+        var contents: [Content] = history.map { msg in
             Content(role: msg.role == .user ? "user" : "model", parts: [Part(text: msg.text)])
+        }
+        if let ctx = hiddenContext, ctx.isEmpty == false {
+            // Insert context just before the last message if it is user, otherwise append.
+            let contextContent = Content(role: "user", parts: [Part(text: "Selection context:\n" + ctx)])
+            if let lastIndex = contents.indices.last, contents[lastIndex].role == "user" {
+                contents.insert(contextContent, at: lastIndex)
+            } else {
+                contents.append(contextContent)
+            }
         }
         let payload = Payload(contents: contents)
         return try JSONEncoder().encode(payload)

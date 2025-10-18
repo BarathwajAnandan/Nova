@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var vm = ChatViewModel()
+    @EnvironmentObject private var vm: ChatViewModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,7 +27,39 @@ struct ContentView: View {
             Label("Nova", systemImage: "sparkles")
                 .font(.title3.weight(.semibold))
             Spacer()
+            if let app = vm.recognizedApp {
+                HStack(spacing: 6) {
+                    if let icon = app.icon {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .interpolation(.high)
+                            .frame(width: 16, height: 16)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    } else {
+                        Image(systemName: "app")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(app.name)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.trailing, 8)
+                .help("Frontmost app recognized by Nova")
+            }
+            Toggle("Auto-capture", isOn: Binding(
+                get: { vm.autoCaptureEnabled },
+                set: { vm.setAutoCapture($0) }
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
+            .help("Continuously capture text from the frontmost window and attach as context (no auto-send)")
             if vm.isStreaming { ProgressView().controlSize(.small) }
+            Button(action: { vm.captureSelection() }) {
+                Image(systemName: "rectangle.and.text.magnifyingglass")
+            }
+            .buttonStyle(.plain)
+            .help("Capture currently selected text from the frontmost app")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -58,7 +90,28 @@ struct ContentView: View {
     }
 
     private var inputBar: some View {
-        HStack(alignment: .center, spacing: 8) {
+        VStack(spacing: 6) {
+            if let ctx = vm.pendingContext {
+                HStack(spacing: 8) {
+                    Image(systemName: "tag.fill")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(.secondary)
+                    Text("Context attached (\(ctx.count) chars)\(vm.recognizedApp != nil ? " from \(vm.recognizedApp!.name)" : "")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer()
+                    Button(action: { vm.clearPendingContext() }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove attached selection context")
+                }
+                .padding(.horizontal, 4)
+            }
+            HStack(alignment: .center, spacing: 8) {
             ChatInputTextView(text: $vm.input) {
                 Task { await vm.send() }
             }
@@ -79,6 +132,7 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .keyboardShortcut(.return, modifiers: [.command])
             .disabled(vm.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vm.isStreaming)
+            }
         }
         .padding(10)
         .padding(.horizontal, 8)
