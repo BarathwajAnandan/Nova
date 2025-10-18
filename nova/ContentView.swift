@@ -55,7 +55,7 @@ struct ContentView: View {
             .labelsHidden()
             .help("Continuously capture text from the frontmost window and attach as context (no auto-send)")
             if vm.isStreaming { ProgressView().controlSize(.small) }
-            // Button(action: { vm.captureSelection() }) {
+            // Button(action: { vm.captureSelection() }) {dd 
             //     Image(systemName: "rectangle.and.text.magnifyingglass")
             // }
             // .buttonStyle(.plain)
@@ -169,8 +169,7 @@ private struct MessageRow: View {
     }
 
     private var bubble: some View {
-        Text(message.text)
-            .textSelection(.enabled)
+        MarkdownBlockText(markdown: message.text)
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 10)
