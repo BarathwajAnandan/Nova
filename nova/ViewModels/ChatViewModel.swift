@@ -77,9 +77,16 @@ final class ChatViewModel: ObservableObject {
         do {
             let hidden = pendingContext
             pendingContext = nil
-            let stream = try await client.streamResponse(history: messages, hiddenContext: hidden)
-            for await delta in stream {
-                messages[assistantIndex].text += delta
+            if let image = screenshot, let jpeg = toJPEGData(image) {
+                // Clear screenshot so it isn't reused unintentionally
+                screenshot = nil
+                let reply = try await client.generateOnce(history: messages, hiddenContext: hidden, imageData: jpeg, mimeType: "image/jpeg")
+                messages[assistantIndex].text = reply
+            } else {
+                let stream = try await client.streamResponse(history: messages, hiddenContext: hidden)
+                for await delta in stream {
+                    messages[assistantIndex].text += delta
+                }
             }
         } catch {
             errorMessage = (error as NSError).localizedDescription
@@ -141,6 +148,12 @@ final class ChatViewModel: ObservableObject {
         } catch {
             return nil
         }
+    }
+
+    // MARK: - Image encoding
+    private func toJPEGData(_ image: NSImage, quality: Double = 0.9) -> Data? {
+        guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
+        return bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality])
     }
 }
 
