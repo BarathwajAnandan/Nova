@@ -8,6 +8,10 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import ScreenCaptureKit
+import CoreImage
+import CoreMedia
+import CoreVideo
 
 struct RecognizedApp {
     let name: String
@@ -17,6 +21,7 @@ struct RecognizedApp {
 final class AccessibilityCaptureService {
     var onCapture: ((String) -> Void)?
     var onRecognizedAppChange: ((RecognizedApp?) -> Void)?
+    var onScreenshot: ((NSImage) -> Void)?
 
     private var timer: Timer?
     private var lastHash: Int?
@@ -125,6 +130,17 @@ final class AccessibilityCaptureService {
         lastNonSelfAppBundleId = app.bundleIdentifier
         lastNonSelfAppPid = app.processIdentifier
         onRecognizedAppChange?(snapshot)
+
+        // Capture a screenshot of the focused window for the new frontmost app (non-self)
+        let pid = app.processIdentifier
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            if let image = await self.captureFocusedWindowScreenshot(pid: pid) {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onScreenshot?(image)
+                }
+            }
+        }
     }
 
     private func collectText(from element: AXUIElement, visited: inout Set<UnsafeMutableRawPointer>) -> String {
@@ -193,6 +209,105 @@ final class AccessibilityCaptureService {
 
 
 extension AccessibilityCaptureService {
+    // MARK: - Screen recording permission
+    private func ensureScreenRecordingPermission() -> Bool {
+        if CGPreflightScreenCaptureAccess() { return true }
+        return CGRequestScreenCaptureAccess()
+    }
+
+    // MARK: - Focused window screenshot capture
+    fileprivate func captureFocusedWindowScreenshot(pid: pid_t) async -> NSImage? {
+        guard ensureScreenRecordingPermission() else { return nil }
+
+        let appElement = AXUIElementCreateApplication(pid)
+
+        // Try to get the focused window and its window number
+        var windowRef: CFTypeRef?
+        let windowResult = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef)
+        if windowResult == .success, let windowRef, CFGetTypeID(windowRef) == AXUIElementGetTypeID() {
+            let windowEl = windowRef as! AXUIElement
+            var numberRef: CFTypeRef?
+            let numberResult = AXUIElementCopyAttributeValue(windowEl, "AXWindowNumber" as CFString, &numberRef)
+            if numberResult == .success, let anyRef = numberRef, CFGetTypeID(anyRef) == CFNumberGetTypeID() {
+                let cfNumber = anyRef as! CFNumber
+                var windowNumber: Int32 = 0
+                if CFNumberGetValue(cfNumber, .sInt32Type, &windowNumber) {
+                    return await captureWithScreenCaptureKit(targetPid: pid, targetWindowId: CGWindowID(UInt32(windowNumber)))
+                }
+            }
+        }
+        // Fallback: enumerate shareable windows for the PID and capture the first on-screen match
+        return await captureWithScreenCaptureKit(targetPid: pid, targetWindowId: nil)
+    }
+
+    // MARK: - ScreenCaptureKit path
+    private func captureWithScreenCaptureKit(targetPid: pid_t, targetWindowId: CGWindowID?) async -> NSImage? {
+        guard #available(macOS 12.3, *) else { return nil }
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+
+            // Resolve target SCWindow
+            let targetWindow: SCWindow?
+            if let windowId = targetWindowId {
+                targetWindow = content.windows.first(where: { $0.windowID == windowId && $0.owningApplication?.processID == targetPid })
+            } else {
+                targetWindow = content.windows.first(where: { $0.owningApplication?.processID == targetPid })
+            }
+
+            guard let scWindow = targetWindow else { return nil }
+
+            let filter = SCContentFilter(desktopIndependentWindow: scWindow)
+            let config = SCStreamConfiguration()
+            // Match window size; if zero, default to 1280x800
+            let width = Int(max(scWindow.frame.width, 1))
+            let height = Int(max(scWindow.frame.height, 1))
+            config.width = width
+            config.height = height
+            config.queueDepth = 1
+            config.showsCursor = false
+            config.capturesAudio = false
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+
+            let grabber = SingleFrameGrabber()
+            let stream = SCStream(filter: filter, configuration: config, delegate: nil)
+            try stream.addStreamOutput(grabber, type: .screen, sampleHandlerQueue: DispatchQueue.global(qos: .userInitiated))
+            try await stream.startCapture()
+
+            // Wait up to 1s for the first frame
+            let timeout: DispatchTime = .now() + .seconds(1)
+            _ = grabber.semaphore.wait(timeout: timeout)
+
+            try? await stream.stopCapture()
+            try? stream.removeStreamOutput(grabber, type: .screen)
+
+            if let cgImage = grabber.image {
+                return NSImage(cgImage: cgImage, size: .zero)
+            }
+        } catch {
+            return nil
+        }
+        return nil
+    }
+
+    // MARK: - Helpers
+    private final class SingleFrameGrabber: NSObject, SCStreamOutput {
+        let semaphore = DispatchSemaphore(value: 0)
+        private(set) var image: CGImage?
+        private static let ciContext = CIContext(options: nil)
+
+        func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
+            guard outputType == .screen, image == nil else { return }
+            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+            let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+            let rect = CGRect(x: 0, y: 0, width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer))
+            if let cg = Self.ciContext.createCGImage(ciImage, from: rect) {
+                image = cg
+                semaphore.signal()
+            }
+        }
+    }
+
     /// Capture the currently selected text from the focused UI element of the frontmost app.
     /// Falls back to selected range extraction when plain selected text is unavailable.
     /// Returns a clipped string (up to maxChars) or nil if not available/secure.

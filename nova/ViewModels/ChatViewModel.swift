@@ -17,6 +17,7 @@ final class ChatViewModel: ObservableObject {
     @Published var autoCaptureEnabled: Bool = false
     @Published var recognizedApp: RecognizedApp?
     @Published var pendingContext: String?
+    @Published var screenshot: NSImage?
 
     private let client = GeminiClient()
     private let capturer = AccessibilityCaptureService()
@@ -28,22 +29,17 @@ final class ChatViewModel: ObservableObject {
         capturer.onCapture = { [weak self] text in
             guard let self else { return }
             print("Captured context (\(text.count) chars)\n\(text)\n---")
-            // Append captured text into hidden context instead of auto-sending
-            let separator = "\n\n---\n\n"
-            if let existing = self.pendingContext, existing.isEmpty == false {
-                self.pendingContext = existing + separator + text
-            } else {
-                self.pendingContext = text
-            }
-            // Clamp to a safe maximum length
-            if let ctx = self.pendingContext, ctx.count > 8000 {
-                self.pendingContext = String(ctx.suffix(8000))
-            }
+            // Replace any existing context with the most recent capture
+            self.pendingContext = String(text.prefix(10000))
         }
 
         capturer.onRecognizedAppChange = { [weak self] app in
             guard let self else { return }
             self.recognizedApp = app
+        }
+
+        capturer.onScreenshot = { [weak self] image in
+            self?.screenshot = image
         }
     }
 
