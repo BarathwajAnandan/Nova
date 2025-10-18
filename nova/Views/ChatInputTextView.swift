@@ -10,6 +10,7 @@ import AppKit
 
 struct ChatInputTextView: NSViewRepresentable {
     @Binding var text: String
+    var isEnabled: Bool = true
     var onSubmit: () -> Void
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -24,7 +25,7 @@ struct ChatInputTextView: NSViewRepresentable {
         textView.textColor = .labelColor
         textView.insertionPointColor = .labelColor
         textView.isRichText = false
-        textView.isEditable = true
+        textView.isEditable = isEnabled
         textView.isSelectable = true
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
@@ -47,6 +48,7 @@ struct ChatInputTextView: NSViewRepresentable {
 
         scrollView.documentView = textView
         context.coordinator.textView = textView
+        context.coordinator.startObserving()
         textView.string = text
         return scrollView
     }
@@ -55,6 +57,10 @@ struct ChatInputTextView: NSViewRepresentable {
         guard let textView = context.coordinator.textView else { return }
         if textView.string != text {
             textView.string = text
+        }
+        // Keep editability in sync with SwiftUI state
+        if textView.isEditable != isEnabled {
+            textView.isEditable = isEnabled
         }
         if let container = textView.textContainer, let superview = textView.superview {
             container.containerSize = NSSize(width: superview.bounds.width, height: CGFloat.greatestFiniteMagnitude)
@@ -71,6 +77,7 @@ struct ChatInputTextView: NSViewRepresentable {
         var textView: NSTextView?
         @Binding var text: String
         let onSubmit: () -> Void
+        private var isObserving: Bool = false
 
         init(text: Binding<String>, onSubmit: @escaping () -> Void) {
             self._text = text
@@ -91,6 +98,38 @@ struct ChatInputTextView: NSViewRepresentable {
             let converted = tv.convert(caretRect, to: tv.enclosingScrollView?.contentView)
             tv.enclosingScrollView?.contentView.scrollToVisible(converted)
             tv.enclosingScrollView?.reflectScrolledClipView(tv.enclosingScrollView!.contentView)
+        }
+
+        // Observe app/window activation to restore focus to the input
+        func startObserving() {
+            guard isObserving == false else { return }
+            isObserving = true
+            NotificationCenter.default.addObserver(self, selector: #selector(handleAppBecameActive), name: NSApplication.didBecomeActiveNotification, object: nil)
+            NotificationCenter.default.addObserver(self, selector: #selector(handleWindowBecameKey(_:)), name: NSWindow.didBecomeKeyNotification, object: nil)
+        }
+
+        deinit {
+            if isObserving {
+                NotificationCenter.default.removeObserver(self)
+            }
+        }
+
+        @objc private func handleAppBecameActive() {
+            restoreFirstResponder()
+        }
+
+        @objc private func handleWindowBecameKey(_ note: Notification) {
+            restoreFirstResponder()
+        }
+
+        private func restoreFirstResponder() {
+            guard let tv = textView else { return }
+            // Only attempt to focus if the window is key and the view is editable
+            guard let window = tv.window, window.isKeyWindow, tv.isEditable else { return }
+            if window.firstResponder !== tv {
+                window.makeFirstResponder(tv)
+                scrollCaretIntoView()
+            }
         }
     }
 }

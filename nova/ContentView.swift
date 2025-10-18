@@ -112,7 +112,7 @@ struct ContentView: View {
                 .padding(.horizontal, 4)
             }
             HStack(alignment: .center, spacing: 8) {
-            ChatInputTextView(text: $vm.input) {
+            ChatInputTextView(text: $vm.input, isEnabled: !vm.isStreaming) {
                 Task { await vm.send() }
             }
             .frame(minHeight: 24, maxHeight: 80)
@@ -120,7 +120,7 @@ struct ContentView: View {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(Color.gray.opacity(0.25))
             )
-            .disabled(vm.isStreaming)
+            // Do not use SwiftUI .disabled on NSViewRepresentable text view; manage editability internally
 
             Button(action: { Task { await vm.send() } }) {
                 Image(systemName: "paperplane.fill")
