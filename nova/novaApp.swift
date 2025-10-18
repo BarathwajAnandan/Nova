@@ -13,5 +13,10 @@ struct novaApp: App {
         WindowGroup {
             ContentView()
         }
+        .windowStyle(.automatic)
+
+        Settings {
+            SettingsView()
+        }
     }
 }
