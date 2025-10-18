@@ -55,11 +55,11 @@ struct ContentView: View {
             .labelsHidden()
             .help("Continuously capture text from the frontmost window and attach as context (no auto-send)")
             if vm.isStreaming { ProgressView().controlSize(.small) }
-            Button(action: { vm.captureSelection() }) {
-                Image(systemName: "rectangle.and.text.magnifyingglass")
-            }
-            .buttonStyle(.plain)
-            .help("Capture currently selected text from the frontmost app")
+            // Button(action: { vm.captureSelection() }) {
+            //     Image(systemName: "rectangle.and.text.magnifyingglass")
+            // }
+            // .buttonStyle(.plain)
+            // .help("Capture currently selected text from the frontmost app")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
