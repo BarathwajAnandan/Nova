@@ -9,6 +9,7 @@ import SwiftUI
 
 @main
 struct novaApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var vm = ChatViewModel()
     var body: some Scene {
         WindowGroup {
@@ -22,6 +23,13 @@ struct novaApp: App {
                     vm.captureSelection()
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Toggle Nova") {
+                    AppVisibilityController.shared.toggle()
+                }
+                .keyboardShortcut("n", modifiers: [.command, .option])
             }
         }
 

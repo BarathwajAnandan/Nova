@@ -20,6 +20,8 @@ struct ContentView: View {
         }
         .frame(minWidth: 720, minHeight: 520)
         .background(Color(nsColor: .textBackgroundColor))
+        // Attach the window accessor invisibly so it doesn't affect layout
+        .background(WindowAccessor().frame(width: 0, height: 0))
     }
 
     private var header: some View {

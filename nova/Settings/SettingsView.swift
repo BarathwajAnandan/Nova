@@ -10,6 +10,8 @@ import SwiftUI
 struct SettingsView: View {
     @State private var apiKey: String = ""
     @State private var status: String = ""
+    @State private var startCollapsed: Bool = true
+    @State private var hideIconWhenExpanded: Bool = false
 
     var body: some View {
         Form {
@@ -25,10 +27,18 @@ struct SettingsView: View {
                     Text(status).foregroundStyle(.secondary)
                 }
             }
+            Section(header: Text("Nova UI")) {
+                Toggle("Start collapsed", isOn: $startCollapsed)
+                Toggle("Hide icon while window is open", isOn: $hideIconWhenExpanded)
+                HStack {
+                    Button("Apply Now") { applyUiSettings() }
+                    Spacer()
+                }
+            }
             Section(footer: Text("Your key is stored securely using Apple Keychain and is only used for requests to Google Gemini.").font(.footnote)) { EmptyView() }
         }
         .padding(16)
-        .onAppear { load() }
+        .onAppear { load(); loadUiSettings() }
         .frame(width: 520)
     }
 
@@ -53,6 +63,23 @@ struct SettingsView: View {
             status = "Deleted"
         } catch {
             status = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadUiSettings() {
+        let defaults = UserDefaults.standard
+        startCollapsed = (defaults.object(forKey: "StartCollapsed") as? Bool) ?? true
+        hideIconWhenExpanded = defaults.bool(forKey: "HideIconWhenExpanded")
+    }
+
+    private func applyUiSettings() {
+        let defaults = UserDefaults.standard
+        defaults.set(startCollapsed, forKey: "StartCollapsed")
+        defaults.set(hideIconWhenExpanded, forKey: "HideIconWhenExpanded")
+        if startCollapsed {
+            AppVisibilityController.shared.collapse()
+        } else {
+            AppVisibilityController.shared.expand()
         }
     }
 }
