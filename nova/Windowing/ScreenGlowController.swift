@@ -24,7 +24,7 @@ final class ScreenGlowController {
         }
     }
 
-    func showGlow(on screen: NSScreen? = NSScreen.main) {
+    func showGlow(on screen: NSScreen? = NSScreen.main, style: GlowStyle = .listening) {
         guard let screen else {
             hideGlow()
             return
@@ -33,14 +33,19 @@ final class ScreenGlowController {
         if let existing = glowWindow {
             if existing.screen != screen {
                 hideGlow()
-                createGlowWindow(for: screen)
+                createGlowWindow(for: screen, style: style)
             } else {
-                update(window: existing, for: screen)
+                update(window: existing, for: screen, style: style)
                 existing.orderFrontRegardless()
             }
         } else {
-            createGlowWindow(for: screen)
+            createGlowWindow(for: screen, style: style)
         }
+    }
+    
+    enum GlowStyle {
+        case listening
+        case processing
     }
 
     func hideGlow() {
@@ -60,7 +65,7 @@ final class ScreenGlowController {
 
     // MARK: - Private helpers
 
-    private func createGlowWindow(for screen: NSScreen) {
+    private func createGlowWindow(for screen: NSScreen, style: GlowStyle) {
         let panel = NSPanel(
             contentRect: screen.frame,
             styleMask: [.borderless],
@@ -70,7 +75,7 @@ final class ScreenGlowController {
         )
         configure(panel: panel, for: screen)
 
-        let hostingView = NSHostingView(rootView: ScreenGlowView())
+        let hostingView = NSHostingView(rootView: ScreenGlowView(style: style))
         hostingView.frame = panel.contentView?.bounds ?? panel.frame
         hostingView.autoresizingMask = [.width, .height]
         hostingView.wantsLayer = true
@@ -99,11 +104,14 @@ final class ScreenGlowController {
         panel.isReleasedWhenClosed = false
     }
 
-    private func update(window: NSPanel, for screen: NSScreen) {
+    private func update(window: NSPanel, for screen: NSScreen, style: GlowStyle) {
         configure(panel: window, for: screen)
-        if let hosting = window.contentView as? NSHostingView<ScreenGlowView> {
-            hosting.frame = window.contentView?.bounds ?? window.frame
-        }
+        let hostingView = NSHostingView(rootView: ScreenGlowView(style: style))
+        hostingView.frame = window.contentView?.bounds ?? window.frame
+        hostingView.autoresizingMask = [.width, .height]
+        hostingView.wantsLayer = true
+        hostingView.layer?.backgroundColor = NSColor.clear.cgColor
+        window.contentView = hostingView
     }
 
     private func updateForScreenChanges() {
@@ -114,17 +122,33 @@ final class ScreenGlowController {
 }
 
 private struct ScreenGlowView: View {
+    let style: ScreenGlowController.GlowStyle
     @State private var animate = false
 
-    private let gradient = AngularGradient(
-        gradient: Gradient(colors: [
-            Color.purple.opacity(0.95),
-            Color.blue.opacity(0.9),
-            Color.cyan.opacity(0.95),
-            Color.purple.opacity(0.95)
-        ]),
-        center: .center
-    )
+    private var gradient: AngularGradient {
+        switch style {
+        case .listening:
+            return AngularGradient(
+                gradient: Gradient(colors: [
+                    Color.purple.opacity(0.95),
+                    Color.blue.opacity(0.9),
+                    Color.cyan.opacity(0.95),
+                    Color.purple.opacity(0.95)
+                ]),
+                center: .center
+            )
+        case .processing:
+            return AngularGradient(
+                gradient: Gradient(colors: [
+                    Color.orange.opacity(0.8),
+                    Color.red.opacity(0.7),
+                    Color.pink.opacity(0.8),
+                    Color.orange.opacity(0.8)
+                ]),
+                center: .center
+            )
+        }
+    }
 
     var body: some View {
         GeometryReader { proxy in

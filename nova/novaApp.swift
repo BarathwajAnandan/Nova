@@ -40,6 +40,7 @@ struct novaApp: App {
 
         Settings {
             SettingsView()
+                .environmentObject(appDelegate.sharedViewModel)
         }
     }
 }

@@ -8,10 +8,13 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @EnvironmentObject private var vm: ChatViewModel
     @State private var apiKey: String = ""
     @State private var status: String = ""
     @State private var startCollapsed: Bool = true
     @State private var hideIconWhenExpanded: Bool = false
+    @State private var availableVoices: [(identifier: String, displayName: String, quality: String)] = []
+    @State private var selectedVoiceIdentifier: String = ""
 
     var body: some View {
         Form {
@@ -27,6 +30,30 @@ struct SettingsView: View {
                     Text(status).foregroundStyle(.secondary)
                 }
             }
+            
+            Section(header: Text("Voice Settings")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Voice")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Picker("Voice", selection: $selectedVoiceIdentifier) {
+                        ForEach(availableVoices, id: \.identifier) { voice in
+                            Text(voice.displayName)
+                                .tag(voice.identifier)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
+                    .onChange(of: selectedVoiceIdentifier) { newValue in
+                        vm.setVoice(newValue)
+                    }
+                    
+                    Text("⭐️ Premium voices offer the highest quality. ✨ Enhanced voices are also high quality.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
             Section(header: Text("Nova UI")) {
                 Toggle("Start collapsed", isOn: $startCollapsed)
                 Toggle("Hide icon while window is open", isOn: $hideIconWhenExpanded)
@@ -38,7 +65,11 @@ struct SettingsView: View {
             Section(footer: Text("Your key is stored securely using Apple Keychain and is only used for requests to Google Gemini.").font(.footnote)) { EmptyView() }
         }
         .padding(16)
-        .onAppear { load(); loadUiSettings() }
+        .onAppear { 
+            load()
+            loadUiSettings()
+            loadVoices()
+        }
         .frame(width: 520)
     }
 
@@ -80,6 +111,15 @@ struct SettingsView: View {
             AppVisibilityController.shared.collapse()
         } else {
             AppVisibilityController.shared.expand()
+        }
+    }
+    
+    private func loadVoices() {
+        availableVoices = vm.getAvailableVoices()
+        if let currentVoice = vm.getCurrentVoiceIdentifier() {
+            selectedVoiceIdentifier = currentVoice
+        } else if let firstVoice = availableVoices.first {
+            selectedVoiceIdentifier = firstVoice.identifier
         }
     }
 }

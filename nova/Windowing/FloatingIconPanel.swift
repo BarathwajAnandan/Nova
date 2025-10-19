@@ -6,7 +6,7 @@ final class FloatingIconPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     init(contentView: NSView) {
-        super.init(contentRect: NSRect(x: 200, y: 200, width: 48, height: 48),
+        super.init(contentRect: NSRect(x: 200, y: 200, width: 80, height: 48),
                    styleMask: [.borderless, .nonactivatingPanel],
                    backing: .buffered,
                    defer: false)
@@ -23,7 +23,7 @@ final class FloatingIconPanel: NSPanel {
         standardWindowButton(.closeButton)?.isHidden = true
         standardWindowButton(.miniaturizeButton)?.isHidden = true
         standardWindowButton(.zoomButton)?.isHidden = true
-        setFrame(NSRect(x: 200, y: 200, width: 48, height: 48), display: false)
+        setFrame(NSRect(x: 200, y: 200, width: 80, height: 48), display: false)
         self.contentView = contentView
     }
 }

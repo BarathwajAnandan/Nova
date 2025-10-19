@@ -250,23 +250,18 @@ private struct MessageRow: View {
 }
 
 private struct TypingIndicator: View {
-    @State private var phase: Int = 0
+    @State private var dotCount: Int = 0
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(0..<3, id: \.self) { i in
-                Circle()
-                    .fill(Color.gray.opacity(0.6))
-                    .frame(width: 6, height: 6)
-                    .scaleEffect(phase == i ? 1.0 : 0.6)
+        Text("working on it" + String(repeating: ".", count: dotCount))
+            .foregroundStyle(.secondary)
+            .font(.body)
+            .onAppear {
+                Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+                    dotCount = (dotCount + 1) % 4
+                }
             }
-        }
-        .onAppear {
-            Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
-                phase = (phase + 1) % 3
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
     }
 }
 

@@ -79,6 +79,8 @@ final class ChatViewModel: ObservableObject {
         #if os(macOS)
         refreshInputDevices()
         #endif
+        
+        loadSavedVoice()
     }
 
     func loadApiKeyExists() -> Bool {
@@ -142,6 +144,7 @@ final class ChatViewModel: ObservableObject {
         let assistantIndex = messages.count - 1
 
         isStreaming = true
+        ScreenGlowController.shared.showGlow(style: .processing)
         do {
             let hidden = pendingContext
             pendingContext = nil
@@ -170,6 +173,7 @@ final class ChatViewModel: ObservableObject {
             errorMessage = (error as NSError).localizedDescription
         }
         isStreaming = false
+        ScreenGlowController.shared.hideGlow()
     }
 
     func sendTranscribedText(_ text: String) async {
@@ -351,6 +355,30 @@ final class ChatViewModel: ObservableObject {
 
     func clearPendingContext() {
         pendingContext = nil
+    }
+    
+    // MARK: - Voice Selection
+    func getAvailableVoices() -> [(identifier: String, displayName: String, quality: String)] {
+        return speechSynthesizer.getAvailableVoices()
+    }
+    
+    func getCurrentVoiceIdentifier() -> String? {
+        return speechSynthesizer.getCurrentVoiceIdentifier()
+    }
+    
+    func setVoice(_ identifier: String?) {
+        speechSynthesizer.setVoice(identifier)
+        if let id = identifier {
+            UserDefaults.standard.set(id, forKey: "SelectedVoiceIdentifier")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "SelectedVoiceIdentifier")
+        }
+    }
+    
+    func loadSavedVoice() {
+        if let savedIdentifier = UserDefaults.standard.string(forKey: "SelectedVoiceIdentifier") {
+            speechSynthesizer.setVoice(savedIdentifier)
+        }
     }
 
     // MARK: - Screenshot saving
