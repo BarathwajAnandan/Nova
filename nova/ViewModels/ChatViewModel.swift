@@ -126,10 +126,14 @@ final class ChatViewModel: ObservableObject {
     }
 
     func handleGlobalHotkeyPress() {
-        if isListening {
-            stopListening(commitPartial: true, send: true)
-            withAnimation(.easeInOut(duration: 0.3)) {
-                isHotkeyCaptureActive = false
+        if isHotkeyCaptureActive {
+            if isListening {
+                stopListening(commitPartial: true, send: true)
+            } else {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    isHotkeyCaptureActive = false
+                }
+                ScreenGlowController.shared.hideGlow()
             }
         } else {
             startHotkeyCapture()
@@ -141,7 +145,8 @@ final class ChatViewModel: ObservableObject {
         hotkeyTask = Task { [weak self] in
             guard let self else { return }
             await MainActor.run {
-                AppVisibilityController.shared.expand()
+                AppVisibilityController.shared.ensureIconWindow()
+                ScreenGlowController.shared.showGlow()
                 withAnimation(.easeInOut(duration: 0.3)) {
                     self.isHotkeyCaptureActive = true
                 }
@@ -165,6 +170,7 @@ final class ChatViewModel: ObservableObject {
                     self.errorMessage = "Microphone/Speech permission required in System Settings."
                     withAnimation(.easeInOut(duration: 0.3)) {
                         self.isHotkeyCaptureActive = false
+                        ScreenGlowController.shared.hideGlow()
                     }
                     continuation.resume(returning: false)
                     return
@@ -172,11 +178,13 @@ final class ChatViewModel: ObservableObject {
                 do {
                     try self.speech.start()
                     self.isListening = true
+                    ScreenGlowController.shared.showGlow()
                     continuation.resume(returning: true)
                 } catch {
                     self.errorMessage = (error as NSError).localizedDescription
                     withAnimation(.easeInOut(duration: 0.3)) {
                         self.isHotkeyCaptureActive = false
+                        ScreenGlowController.shared.hideGlow()
                     }
                     continuation.resume(returning: false)
                 }
@@ -215,6 +223,7 @@ final class ChatViewModel: ObservableObject {
             do {
                 try self.speech.start()
                 self.isListening = true
+                ScreenGlowController.shared.showGlow()
             } catch {
                 self.errorMessage = (error as NSError).localizedDescription
             }
@@ -235,6 +244,7 @@ final class ChatViewModel: ObservableObject {
         }
         isListening = false
         partialTranscript = nil
+        ScreenGlowController.shared.hideGlow()
     }
 
     func setAutoCapture(_ enabled: Bool) {
@@ -325,6 +335,7 @@ extension ChatViewModel: SpeechRecognitionServiceDelegate {
         withAnimation(.easeInOut(duration: 0.3)) {
             isHotkeyCaptureActive = false
         }
+        ScreenGlowController.shared.hideGlow()
         Task { await sendTranscribedText(text) }
     }
 
@@ -334,6 +345,7 @@ extension ChatViewModel: SpeechRecognitionServiceDelegate {
         withAnimation(.easeInOut(duration: 0.3)) {
             isHotkeyCaptureActive = false
         }
+        ScreenGlowController.shared.hideGlow()
         errorMessage = (error as NSError).localizedDescription
     }
 
@@ -343,6 +355,9 @@ extension ChatViewModel: SpeechRecognitionServiceDelegate {
             withAnimation(.easeInOut(duration: 0.3)) {
                 isHotkeyCaptureActive = false
             }
+            ScreenGlowController.shared.hideGlow()
+        } else {
+            ScreenGlowController.shared.showGlow()
         }
     }
 }

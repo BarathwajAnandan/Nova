@@ -54,7 +54,7 @@ final class AppVisibilityController {
         guard isCollapsed == false else { return }
         ensureIconWindow()
         for w in NSApp.windows {
-            if w !== iconWC?.window {
+            if w !== iconWC?.window && ScreenGlowController.shared.isGlowWindow(w) == false {
                 w.orderOut(nil)
             }
         }
@@ -94,7 +94,11 @@ final class AppVisibilityController {
     func startupCollapsed() {
         ensureIconWindow()
         isCollapsed = true
-        for w in NSApp.windows { if w !== iconWC?.window { w.orderOut(nil) } }
+        for w in NSApp.windows {
+            if w !== iconWC?.window && ScreenGlowController.shared.isGlowWindow(w) == false {
+                w.orderOut(nil)
+            }
+        }
     }
 
     func startupRespectingSettings() {
