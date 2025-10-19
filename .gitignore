@@ -1,1 +1,8 @@
 *.png
+**/.venv
+**/.cursor
+**/.DS_Store
+**/.idea
+**/.vscode
+**/.pytest_cache
+**/.pytest_cache
