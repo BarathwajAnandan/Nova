@@ -11,6 +11,7 @@ import AppKit
 /// Simple wrapper around `NSSpeechSynthesizer` for one-shot playback.
 final class SpeechSynthesisService: NSObject {
     private let synthesizer: NSSpeechSynthesizer
+    var onSpeakingStateChanged: ((Bool) -> Void)?
 
     override init() {
         synthesizer = NSSpeechSynthesizer()
@@ -32,6 +33,7 @@ final class SpeechSynthesisService: NSObject {
                 self.synthesizer.stopSpeaking()
             }
             self.synthesizer.startSpeaking(trimmed)
+            self.onSpeakingStateChanged?(true)
         }
     }
 
@@ -41,6 +43,7 @@ final class SpeechSynthesisService: NSObject {
             if self.synthesizer.isSpeaking {
                 self.synthesizer.stopSpeaking()
             }
+            self.onSpeakingStateChanged?(false)
         }
     }
 
@@ -66,9 +69,21 @@ final class SpeechSynthesisService: NSObject {
     }
 
     private func configureDefaultVoice() {
+        // Filter to only US English voices to avoid loading descriptors for all language voices
         let availableVoices = NSSpeechSynthesizer.availableVoices
-        let preferred = availableVoices.first(where: { Self.voiceMatches($0, keyword: "Zoe (Premium)") })
-            ?? availableVoices.first(where: { Self.voiceMatches($0, keyword: "samantha") })
+        let usEnglishVoices = availableVoices.filter { voice in
+            let attributes = NSSpeechSynthesizer.attributes(forVoice: voice)
+            let locale = (attributes[.localeIdentifier] as? String) ?? ""
+            // Only check US English voices to prevent loading all language descriptors
+            return locale.hasPrefix("en_US") || locale.hasPrefix("en-US")
+        }
+        
+        // Try to find a good US English voice (Zoe Premium, then Samantha, then any US voice)
+        let preferred = usEnglishVoices.first(where: { Self.voiceMatches($0, keyword: "Zoe (Premium)") })
+            ?? usEnglishVoices.first(where: { Self.voiceMatches($0, keyword: "samantha") })
+            ?? usEnglishVoices.first
+            ?? availableVoices.first // Fallback to any voice if no US voices found
+        
         guard let voice = preferred else { return }
         _ = synthesizer.setVoice(voice)
     }
@@ -89,6 +104,12 @@ final class SpeechSynthesisService: NSObject {
     }
 }
 
-extension SpeechSynthesisService: NSSpeechSynthesizerDelegate {}
+extension SpeechSynthesisService: NSSpeechSynthesizerDelegate {
+    func speechSynthesizer(_ sender: NSSpeechSynthesizer, didFinishSpeaking finishedSpeaking: Bool) {
+        runOnMain {
+            self.onSpeakingStateChanged?(false)
+        }
+    }
+}
 
 

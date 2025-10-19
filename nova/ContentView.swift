@@ -34,6 +34,24 @@ struct ContentView: View {
             Label("Nova", systemImage: "sparkles")
                 .font(.title3.weight(.semibold))
             Spacer()
+            #if os(macOS)
+            if vm.inputDevices.isEmpty == false {
+                Picker("Input", selection: Binding(
+                    get: { vm.selectedInputDeviceUID ?? "" },
+                    set: { newUID in
+                        vm.selectedInputDeviceUID = newUID.isEmpty ? nil : newUID
+                        vm.applySelectedInputDevice()
+                    }
+                )) {
+                    ForEach(vm.inputDevices, id: \.uid) { dev in
+                        Text(dev.name).tag(dev.uid)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 220)
+                .help("Choose input microphone")
+            }
+            #endif
             if let app = vm.recognizedApp {
                 HStack(spacing: 6) {
                     if let icon = app.icon {
@@ -61,7 +79,33 @@ struct ContentView: View {
             .toggleStyle(.switch)
             .labelsHidden()
             .help("Continuously capture text from the frontmost window and attach as context (no auto-send)")
+            
+            Button(action: { vm.toggleMute() }) {
+                Image(systemName: vm.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(vm.isMuted ? .secondary : .primary)
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.plain)
+            .help(vm.isMuted ? "Unmute voice responses" : "Mute voice responses")
+            
             if vm.isStreaming { ProgressView().controlSize(.small) }
+            if vm.isSpeaking {
+                Button(action: { vm.stopSpeaking() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.system(size: 11))
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.red.opacity(0.8)))
+                }
+                .buttonStyle(.plain)
+                .help("Stop speaking")
+            }
             // Button(action: { vm.captureSelection() }) {dd 
             //     Image(systemName: "rectangle.and.text.magnifyingglass")
             // }

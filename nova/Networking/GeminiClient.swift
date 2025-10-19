@@ -20,7 +20,7 @@ private struct BackendResponse: Decodable {
 }
 
 final class BackendClient {
-    private static let baseURL = URL(string: "http://10.0.0.138:8000")!
+    private static let baseURL = URL(string: "http://localhost:8000")!
     private static let appName = "multi_tool_agent"
     private static let userId = "u"
     private static var sessionId: String = UUID().uuidString

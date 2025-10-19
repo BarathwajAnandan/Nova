@@ -1,6 +1,6 @@
 #!/bin/bash
 
-API_URL="http://10.0.0.138:8000"
+API_URL="http://localhost:8000"
 APP_NAME="multi_tool_agent"
 USER_ID="u"
 SESSION_ID="s"

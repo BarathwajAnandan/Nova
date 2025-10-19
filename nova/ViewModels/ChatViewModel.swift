@@ -17,13 +17,19 @@ final class ChatViewModel: ObservableObject {
     @Published var input: String = ""
     @Published var isStreaming: Bool = false
     @Published var errorMessage: String?
-    @Published var autoCaptureEnabled: Bool = true
+    @Published var autoCaptureEnabled: Bool = false
     @Published var recognizedApp: RecognizedApp?
     @Published var pendingContext: String?
     @Published var screenshot: NSImage?
     @Published var isListening: Bool = false
     @Published var partialTranscript: String?
     @Published var isHotkeyCaptureActive: Bool = false
+    @Published var isSpeaking: Bool = false
+    @Published var isMuted: Bool = false
+    #if os(macOS)
+    @Published var inputDevices: [(name: String, uid: String)] = []
+    @Published var selectedInputDeviceUID: String? = nil
+    #endif
 
     private let client = BackendClient()
     private let capturer = AccessibilityCaptureService()
@@ -35,6 +41,13 @@ final class ChatViewModel: ObservableObject {
     init() {
         // Optional: seed a greeting
         messages = []
+        
+        // Set up speech synthesizer callback
+        speechSynthesizer.onSpeakingStateChanged = { [weak self] isSpeaking in
+            Task { @MainActor in
+                self?.isSpeaking = isSpeaking
+            }
+        }
 
         capturer.onCapture = { [weak self] text in
             guard let self else { return }
@@ -61,7 +74,11 @@ final class ChatViewModel: ObservableObject {
         }
         speech.delegate = self
 
-        setAutoCapture(true)
+        setAutoCapture(false)
+
+        #if os(macOS)
+        refreshInputDevices()
+        #endif
     }
 
     func loadApiKeyExists() -> Bool {
@@ -75,6 +92,41 @@ final class ChatViewModel: ObservableObject {
         errorMessage = nil
         speechSynthesizer.stop()
     }
+    
+    func stopSpeaking() {
+        speechSynthesizer.stop()
+    }
+    
+    func toggleMute() {
+        isMuted.toggle()
+        if isMuted {
+            // Stop any current speech when muting
+            speechSynthesizer.stop()
+        }
+    }
+
+    #if os(macOS)
+    func refreshInputDevices() {
+        inputDevices = speech.listInputDevices()
+        if selectedInputDeviceUID == nil {
+            // Default to built-in mic if present
+            if let builtIn = inputDevices.first(where: { $0.uid == "BuiltInMicrophoneDevice" }) {
+                selectedInputDeviceUID = builtIn.uid
+            } else {
+                selectedInputDeviceUID = inputDevices.first?.uid
+            }
+        }
+    }
+    
+    func applySelectedInputDevice() {
+        guard let uid = selectedInputDeviceUID else { return }
+        _ = speech.setPreferredInputDevice(uid: uid)
+        if isListening {
+            stopListening()
+            startListening()
+        }
+    }
+    #endif
 
     func send() async {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -111,7 +163,9 @@ final class ChatViewModel: ObservableObject {
                 hiddenContext: hidden
             )
             messages[assistantIndex].text = reply
-            speechSynthesizer.speak(reply)
+            if !isMuted {
+                speechSynthesizer.speak(reply)
+            }
         } catch {
             errorMessage = (error as NSError).localizedDescription
         }
@@ -125,7 +179,14 @@ final class ChatViewModel: ObservableObject {
     }
 
     func toggleMic() {
-        if isListening { stopListening(commitPartial: true, send: false) } else { startListening() }
+        print("🎤 [VIEWMODEL DEBUG] toggleMic called, isListening: \(isListening)")
+        if isListening {
+            print("🎤 [VIEWMODEL DEBUG] Stopping listening...")
+            stopListening(commitPartial: true, send: false)
+        } else {
+            print("🎤 [VIEWMODEL DEBUG] Starting listening...")
+            startListening()
+        }
     }
 
     func handleGlobalHotkeyPress() {
@@ -169,27 +230,29 @@ final class ChatViewModel: ObservableObject {
                     continuation.resume(returning: false)
                     return
                 }
-                if granted == false {
-                    self.errorMessage = "Microphone/Speech permission required in System Settings."
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        self.isHotkeyCaptureActive = false
-                        ScreenGlowController.shared.hideGlow()
+                Task { @MainActor in
+                    if granted == false {
+                        self.errorMessage = "Microphone/Speech permission required in System Settings."
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            self.isHotkeyCaptureActive = false
+                            ScreenGlowController.shared.hideGlow()
+                        }
+                        continuation.resume(returning: false)
+                        return
                     }
-                    continuation.resume(returning: false)
-                    return
-                }
-                do {
-                    try self.speech.start()
-                    self.isListening = true
-                    ScreenGlowController.shared.showGlow()
-                    continuation.resume(returning: true)
-                } catch {
-                    self.errorMessage = (error as NSError).localizedDescription
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        self.isHotkeyCaptureActive = false
-                        ScreenGlowController.shared.hideGlow()
+                    do {
+                        try self.speech.start()
+                        self.isListening = true
+                        ScreenGlowController.shared.showGlow()
+                        continuation.resume(returning: true)
+                    } catch {
+                        self.errorMessage = (error as NSError).localizedDescription
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            self.isHotkeyCaptureActive = false
+                            ScreenGlowController.shared.hideGlow()
+                        }
+                        continuation.resume(returning: false)
                     }
-                    continuation.resume(returning: false)
                 }
             }
         }
@@ -217,18 +280,29 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func startListening() {
+        print("🎤 [VIEWMODEL DEBUG] startListening() called, requesting authorization...")
         speech.requestAuthorization { [weak self] granted in
-            guard let self else { return }
-            if granted == false {
-                self.errorMessage = "Microphone/Speech permission required in System Settings."
+            guard let self else {
+                print("🎤 [VIEWMODEL DEBUG] ❌ Self is nil in authorization callback")
                 return
             }
-            do {
-                try self.speech.start()
-                self.isListening = true
-                ScreenGlowController.shared.showGlow()
-            } catch {
-                self.errorMessage = (error as NSError).localizedDescription
+            print("🎤 [VIEWMODEL DEBUG] Authorization callback received, granted: \(granted)")
+            Task { @MainActor in
+                if granted == false {
+                    print("🎤 [VIEWMODEL DEBUG] ❌ Authorization denied")
+                    self.errorMessage = "Microphone/Speech permission required in System Settings."
+                    return
+                }
+                print("🎤 [VIEWMODEL DEBUG] Authorization granted, starting speech service...")
+                do {
+                    try self.speech.start()
+                    print("🎤 [VIEWMODEL DEBUG] ✅ Speech service started successfully")
+                    self.isListening = true
+                    ScreenGlowController.shared.showGlow()
+                } catch {
+                    print("🎤 [VIEWMODEL DEBUG] ❌ Failed to start speech service: \(error.localizedDescription)")
+                    self.errorMessage = (error as NSError).localizedDescription
+                }
             }
         }
     }
@@ -329,20 +403,25 @@ final class ChatViewModel: ObservableObject {
 // MARK: - SpeechRecognitionServiceDelegate
 extension ChatViewModel: SpeechRecognitionServiceDelegate {
     func speechService(_ svc: SpeechRecognitionService, didUpdatePartial text: String) {
+        print("🎤 [DELEGATE] didUpdatePartial: '\(text)'")
         partialTranscript = text
     }
 
     func speechService(_ svc: SpeechRecognitionService, didFinishWith text: String) {
+        print("🎤 [DELEGATE] didFinishWith: '\(text)'")
         isListening = false
         partialTranscript = nil
         withAnimation(.easeInOut(duration: 0.3)) {
             isHotkeyCaptureActive = false
         }
         ScreenGlowController.shared.hideGlow()
-        Task { await sendTranscribedText(text) }
+        // Populate the input field with the final transcript instead of auto-sending
+        input = text
+        print("🎤 [DELEGATE] Input field set to: '\(input)'")
     }
 
     func speechService(_ svc: SpeechRecognitionService, didFail error: Error) {
+        print("🎤 [DELEGATE] didFail: \(error.localizedDescription)")
         isListening = false
         partialTranscript = nil
         withAnimation(.easeInOut(duration: 0.3)) {
@@ -353,6 +432,7 @@ extension ChatViewModel: SpeechRecognitionServiceDelegate {
     }
 
     func speechServiceDidChangeState(_ svc: SpeechRecognitionService, isRunning: Bool) {
+        print("🎤 [DELEGATE] didChangeState: isRunning=\(isRunning)")
         isListening = isRunning
         if isRunning == false {
             withAnimation(.easeInOut(duration: 0.3)) {
