@@ -17,7 +17,7 @@ final class ChatViewModel: ObservableObject {
     @Published var input: String = ""
     @Published var isStreaming: Bool = false
     @Published var errorMessage: String?
-    @Published var autoCaptureEnabled: Bool = false
+    @Published var autoCaptureEnabled: Bool = true
     @Published var recognizedApp: RecognizedApp?
     @Published var pendingContext: String?
     @Published var screenshot: NSImage?
@@ -59,6 +59,8 @@ final class ChatViewModel: ObservableObject {
             }
         }
         speech.delegate = self
+
+        setAutoCapture(true)
     }
 
     func loadApiKeyExists() -> Bool {
