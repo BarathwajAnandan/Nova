@@ -10,6 +10,7 @@ final class AppVisibilityController {
     private(set) var isCollapsed: Bool = true
     private weak var mainWindow: NSWindow?
     private var iconWC: FloatingIconWindowController?
+    private var cachedViewModel: ChatViewModel?
 
     // Settings
     private let startCollapsedKey = "StartCollapsed"
@@ -30,9 +31,7 @@ final class AppVisibilityController {
 
     func ensureIconWindow() {
         if iconWC == nil {
-            guard let vm = (NSApp.delegate as? AppDelegate)?.sharedViewModel else {
-                return
-            }
+            let vm = resolveViewModel()
 
             iconWC = FloatingIconWindowController(
                 viewModel: vm,
@@ -149,6 +148,19 @@ final class AppVisibilityController {
         let x = max(visible.minX, min(visible.maxX - size.width, origin.x))
         let y = max(visible.minY, min(visible.maxY - size.height, origin.y))
         return NSPoint(x: x, y: y)
+    }
+
+    private func resolveViewModel() -> ChatViewModel {
+        if let delegateVM = (NSApp.delegate as? AppDelegate)?.sharedViewModel {
+            cachedViewModel = delegateVM
+            return delegateVM
+        }
+        if let cachedViewModel {
+            return cachedViewModel
+        }
+        let fallback = ChatViewModel()
+        cachedViewModel = fallback
+        return fallback
     }
 }
 
