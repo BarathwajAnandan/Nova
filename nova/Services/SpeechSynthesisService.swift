@@ -67,8 +67,7 @@ final class SpeechSynthesisService: NSObject {
 
     private func configureDefaultVoice() {
         let availableVoices = NSSpeechSynthesizer.availableVoices
-        print(availableVoices)
-        let preferred = availableVoices.first(where: { Self.voiceMatches($0, keyword: "Zoe") })
+        let preferred = availableVoices.first(where: { Self.voiceMatches($0, keyword: "Zoe (Premium)") })
             ?? availableVoices.first(where: { Self.voiceMatches($0, keyword: "samantha") })
         guard let voice = preferred else { return }
         _ = synthesizer.setVoice(voice)
