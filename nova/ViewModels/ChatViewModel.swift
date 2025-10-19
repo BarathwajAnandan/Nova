@@ -28,6 +28,7 @@ final class ChatViewModel: ObservableObject {
     private let client = BackendClient()
     private let capturer = AccessibilityCaptureService()
     private let speech = SpeechRecognitionService()
+    private let speechSynthesizer = SpeechSynthesisService()
 
     private var hotkeyTask: Task<Void, Never>?
 
@@ -72,6 +73,7 @@ final class ChatViewModel: ObservableObject {
     func clearChat() {
         messages.removeAll()
         errorMessage = nil
+        speechSynthesizer.stop()
     }
 
     func send() async {
@@ -109,6 +111,7 @@ final class ChatViewModel: ObservableObject {
                 hiddenContext: hidden
             )
             messages[assistantIndex].text = reply
+            speechSynthesizer.speak(reply)
         } catch {
             errorMessage = (error as NSError).localizedDescription
         }
