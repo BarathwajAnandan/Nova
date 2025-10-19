@@ -74,9 +74,6 @@ struct ContentView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    if vm.loadApiKeyExists() == false {
-                        EmptyState()
-                    }
                     ForEach(vm.messages) { message in
                         MessageRow(message: message)
                             .id(message.id)

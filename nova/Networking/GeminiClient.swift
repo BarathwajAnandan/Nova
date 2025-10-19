@@ -1,178 +1,128 @@
 //
-//  GeminiClient.swift
+//  BackendClient.swift
 //  nova
 //
-//  Streaming client for Google's Gemini API using SSE.
+//  Non-streaming client for the custom Nova backend.
 //
 
 import Foundation
 
-struct GeminiChunk: Decodable {
-    struct Candidate: Decodable {
-        struct Content: Decodable {
-            struct Part: Decodable { let text: String? }
-            let parts: [Part]
-        }
-        let content: Content
+/// Simple DTO for backend responses.
+private struct BackendResponse: Decodable {
+    struct Content: Decodable {
+        struct Part: Decodable { let text: String? }
+        let role: String
+        let parts: [Part]
     }
-    let candidates: [Candidate]
+    let content: Content
 
-    var text: String { candidates.first?.content.parts.first?.text ?? "" }
+    var text: String { content.parts.compactMap { $0.text }.joined() }
 }
 
-final class GeminiClient {
-    private let model = "gemini-2.5-flash"
-    private let base = URL(string: "https://generativelanguage.googleapis.com/v1beta/")!
+final class BackendClient {
+    private static let baseURL = URL(string: "http://10.0.0.138:8000")!
+    private static let appName = "multi_tool_agent"
+    private static let userId = "u"
+    private static let sessionId: String = UUID().uuidString
+    private let sessionCreationTask: Task<Void, Error>
+    private let decoder = JSONDecoder()
 
-    func streamResponse(history: [Message], hiddenContext: String?) async throws -> AsyncStream<String> {
-        guard let apiKey = try KeychainService.shared.readApiKey(), apiKey.isEmpty == false else {
-            throw NSError(domain: "GeminiClient", code: 401, userInfo: [NSLocalizedDescriptionKey: "API key not set. Open Settings to add your key."])
+    init() {
+        sessionCreationTask = Task {
+            try await BackendClient.createSessionIfNeeded(
+                baseURL: BackendClient.baseURL,
+                appName: BackendClient.appName,
+                userId: BackendClient.userId,
+                sessionId: BackendClient.sessionId
+            )
+        }
+    }
+
+    private static func createSessionIfNeeded(baseURL: URL, appName: String, userId: String, sessionId: String) async throws {
+        struct SessionPayload: Encodable {
+            struct State: Encodable {
+                let key1: String
+                let key2: Int
+            }
+            let state: State
         }
 
-        var url = base.appendingPathComponent("models/\(model):streamGenerateContent")
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "alt", value: "sse")]
-        url = components.url!
-
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: baseURL.appendingPathComponent("apps/\(appName)/users/\(userId)/sessions/\(sessionId)"))
         request.httpMethod = "POST"
-        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        let payload = SessionPayload(state: .init(key1: "value1", key2: 42))
+        request.httpBody = try JSONEncoder().encode(payload)
         request.timeoutInterval = 60
 
-        let body = try makeBody(history: history, hiddenContext: hiddenContext)
-        request.httpBody = body
-
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw NSError(domain: "GeminiClient", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: "Server error"])
-        }
-
-        return AsyncStream { continuation in
-            Task {
-                do {
-                    for try await line in bytes.lines {
-                        guard line.hasPrefix("data: ") else { continue }
-                        let payload = line.dropFirst(6)
-                        if payload == "[DONE]" { break }
-                        if let data = payload.data(using: .utf8) {
-                            if let chunk = try? JSONDecoder().decode(GeminiChunk.self, from: data) {
-                                let text = chunk.text
-                                if text.isEmpty == false {
-                                    continuation.yield(text)
-                                }
-                            }
-                        }
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish()
-                }
-            }
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { return }
+        switch http.statusCode {
+        case 200..<300, 409:
+            return
+        default:
+            throw NSError(domain: "BackendClient", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "Failed to create session (status: \(http.statusCode))"])
         }
     }
 
-    // MARK: - Single response with inline image (non-stream)
-    private struct GenerateResponse: Decodable {
-        struct Candidate: Decodable {
-            struct Content: Decodable {
-                struct Part: Decodable { let text: String? }
-                let parts: [Part]
-            }
-            let content: Content
-        }
-        let candidates: [Candidate]
+    func sendMessage(text: String, inlineImageData: Data?, mimeType: String?, hiddenContext: String?) async throws -> String {
+        _ = try await sessionCreationTask.value
 
-        var text: String {
-            guard let first = candidates.first else { return "" }
-            return first.content.parts.compactMap { $0.text }.joined()
-        }
-    }
-
-    func generateOnce(history: [Message], hiddenContext: String?, imageData: Data, mimeType: String) async throws -> String {
         struct InlineData: Encodable {
             let mimeType: String
             let data: String
-            enum CodingKeys: String, CodingKey { case mimeType = "mime_type", data }
         }
         struct Part: Encodable {
             var text: String?
             var inlineData: InlineData?
-            enum CodingKeys: String, CodingKey { case text; case inlineData = "inline_data" }
         }
-        struct Content: Encodable { let role: String; let parts: [Part] }
-        struct Payload: Encodable { let contents: [Content] }
-
-        guard let apiKey = try KeychainService.shared.readApiKey(), apiKey.isEmpty == false else {
-            throw NSError(domain: "GeminiClient", code: 401, userInfo: [NSLocalizedDescriptionKey: "API key not set. Open Settings to add your key."])
+        struct NewMessage: Encodable {
+            let role: String
+            let parts: [Part]
         }
-
-        // Identify the last user message to attach the image to
-        let lastUserIndex: Int? = {
-            for (idx, msg) in history.enumerated().reversed() {
-                if msg.role == .user { return idx }
-            }
-            return nil
-        }()
-
-        var contents: [Content] = []
-        for (idx, msg) in history.enumerated() {
-            var parts: [Part] = []
-            if idx == lastUserIndex {
-                // 1) inline image
-                let b64 = imageData.base64EncodedString()
-                parts.append(Part(text: nil, inlineData: InlineData(mimeType: mimeType, data: b64)))
-                // 2) optional hidden context
-                if let ctx = hiddenContext, ctx.isEmpty == false {
-                    parts.append(Part(text: "Selection context:\n" + ctx, inlineData: nil))
-                }
-                // 3) user's text
-                parts.append(Part(text: msg.text, inlineData: nil))
-            } else {
-                parts.append(Part(text: msg.text, inlineData: nil))
-            }
-            contents.append(Content(role: msg.role == .user ? "user" : "model", parts: parts))
+        struct Payload: Encodable {
+            let appName: String
+            let userId: String
+            let sessionId: String
+            let newMessage: NewMessage
+            let streaming: Bool
         }
 
-        var url = base.appendingPathComponent("models/\(model):generateContent")
-        var request = URLRequest(url: url)
+        var parts: [Part] = []
+        parts.append(Part(text: text, inlineData: nil))
+        if let ctx = hiddenContext, ctx.isEmpty == false {
+            parts.append(Part(text: "Selection context:\n" + ctx, inlineData: nil))
+        }
+        if let data = inlineImageData, let type = mimeType {
+            parts.append(Part(text: nil, inlineData: InlineData(mimeType: type, data: data.base64EncodedString())))
+        }
+
+        let payload = Payload(
+            appName: BackendClient.appName,
+            userId: BackendClient.userId,
+            sessionId: BackendClient.sessionId,
+            newMessage: NewMessage(role: "user", parts: parts),
+            streaming: false
+        )
+
+        var request = URLRequest(url: BackendClient.baseURL.appendingPathComponent("run_sse"))
         request.httpMethod = "POST"
-        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 60
-
-        let body = try JSONEncoder().encode(Payload(contents: contents))
-        request.httpBody = body
+        request.httpBody = try JSONEncoder().encode(payload)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw NSError(domain: "GeminiClient", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: "Server error"])
+            throw NSError(domain: "BackendClient", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: "Server error"])
         }
-        let decoded = try JSONDecoder().decode(GenerateResponse.self, from: data)
+
+        let raw = String(data: data, encoding: .utf8) ?? ""
+        let trimmed = raw.hasPrefix("data: ") ? String(raw.dropFirst(6)) : raw
+        guard let jsonData = trimmed.data(using: .utf8) else {
+            throw NSError(domain: "BackendClient", code: -2, userInfo: [NSLocalizedDescriptionKey: "Invalid response encoding"])
+        }
+
+        let decoded = try decoder.decode(BackendResponse.self, from: jsonData)
         return decoded.text
-    }
-
-    private func makeBody(history: [Message], hiddenContext: String?) throws -> Data {
-        struct Part: Encodable { let text: String }
-        struct Content: Encodable { let role: String; let parts: [Part] }
-        struct Payload: Encodable { let contents: [Content] }
-
-        var contents: [Content] = history.map { msg in
-            Content(role: msg.role == .user ? "user" : "model", parts: [Part(text: msg.text)])
-        }
-        if let ctx = hiddenContext, ctx.isEmpty == false {
-            // Insert context just before the last message if it is user, otherwise append.
-            let contextContent = Content(role: "user", parts: [Part(text: "Selection context:\n" + ctx)])
-            if let lastIndex = contents.indices.last, contents[lastIndex].role == "user" {
-                contents.insert(contextContent, at: lastIndex)
-            } else {
-                contents.append(contextContent)
-            }
-        }
-        let payload = Payload(contents: contents)
-        return try JSONEncoder().encode(payload)
     }
 }
 

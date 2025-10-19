@@ -23,7 +23,7 @@ final class ChatViewModel: ObservableObject {
     @Published var isListening: Bool = false
     @Published var partialTranscript: String?
 
-    private let client = GeminiClient()
+    private let client = BackendClient()
     private let capturer = AccessibilityCaptureService()
     private let speech = SpeechRecognitionService()
 
@@ -58,7 +58,9 @@ final class ChatViewModel: ObservableObject {
     }
 
     func loadApiKeyExists() -> Bool {
-        (try? KeychainService.shared.readApiKey())?.isEmpty == false
+        // Gemini API key no longer required with backend integration.
+        // Keeping return value `true` preserves existing UI flows without prompting for a key.
+        return true
     }
 
     func clearChat() {
@@ -83,17 +85,24 @@ final class ChatViewModel: ObservableObject {
         do {
             let hidden = pendingContext
             pendingContext = nil
+
+            var imageData: Data?
+            var mimeType: String?
             if let image = screenshot, let jpeg = toJPEGData(image) {
+                imageData = jpeg
+                mimeType = "image/jpeg"
                 // Clear screenshot so it isn't reused unintentionally
                 screenshot = nil
-                let reply = try await client.generateOnce(history: messages, hiddenContext: hidden, imageData: jpeg, mimeType: "image/jpeg")
-                messages[assistantIndex].text = reply
-            } else {
-                let stream = try await client.streamResponse(history: messages, hiddenContext: hidden)
-                for await delta in stream {
-                    messages[assistantIndex].text += delta
-                }
             }
+
+            // Previously streamed via Gemini; now use backend single-response flow.
+            let reply = try await client.sendMessage(
+                text: userMessage.text,
+                inlineImageData: imageData,
+                mimeType: mimeType,
+                hiddenContext: hidden
+            )
+            messages[assistantIndex].text = reply
         } catch {
             errorMessage = (error as NSError).localizedDescription
         }
