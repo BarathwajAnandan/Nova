@@ -9,6 +9,7 @@ import Foundation
 import AppKit
 import Speech
 import AVFoundation
+import SwiftUI
 
 @MainActor
 final class ChatViewModel: ObservableObject {
@@ -22,10 +23,13 @@ final class ChatViewModel: ObservableObject {
     @Published var screenshot: NSImage?
     @Published var isListening: Bool = false
     @Published var partialTranscript: String?
+    @Published var isHotkeyCaptureActive: Bool = false
 
     private let client = BackendClient()
     private let capturer = AccessibilityCaptureService()
     private let speech = SpeechRecognitionService()
+
+    private var hotkeyTask: Task<Void, Never>?
 
     init() {
         // Optional: seed a greeting
@@ -117,6 +121,86 @@ final class ChatViewModel: ObservableObject {
 
     func toggleMic() {
         if isListening { stopListening(commitPartial: true, send: false) } else { startListening() }
+    }
+
+    func handleGlobalHotkeyPress() {
+        if isListening {
+            stopListening(commitPartial: true, send: true)
+            withAnimation(.easeInOut(duration: 0.3)) {
+                isHotkeyCaptureActive = false
+            }
+        } else {
+            startHotkeyCapture()
+        }
+    }
+
+    private func startHotkeyCapture() {
+        hotkeyTask?.cancel()
+        hotkeyTask = Task { [weak self] in
+            guard let self else { return }
+            await MainActor.run {
+                AppVisibilityController.shared.expand()
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    self.isHotkeyCaptureActive = true
+                }
+            }
+            let started = await requestAndStartListening()
+            if started {
+                await fetchFrontmostSnapshot()
+            }
+        }
+    }
+
+    @discardableResult
+    private func requestAndStartListening() async -> Bool {
+        await withCheckedContinuation { continuation in
+            speech.requestAuthorization { [weak self] granted in
+                guard let self else {
+                    continuation.resume(returning: false)
+                    return
+                }
+                if granted == false {
+                    self.errorMessage = "Microphone/Speech permission required in System Settings."
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        self.isHotkeyCaptureActive = false
+                    }
+                    continuation.resume(returning: false)
+                    return
+                }
+                do {
+                    try self.speech.start()
+                    self.isListening = true
+                    continuation.resume(returning: true)
+                } catch {
+                    self.errorMessage = (error as NSError).localizedDescription
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        self.isHotkeyCaptureActive = false
+                    }
+                    continuation.resume(returning: false)
+                }
+            }
+        }
+    }
+
+    private func fetchFrontmostSnapshot() async {
+        do {
+            let snapshot = try await capturer.captureFrontmostSnapshot()
+            await MainActor.run {
+                if let context = snapshot.contextText, context.isEmpty == false {
+                    pendingContext = context
+                }
+                if let image = snapshot.screenshot {
+                    screenshot = image
+                }
+                if let app = snapshot.app {
+                    recognizedApp = app
+                }
+            }
+        } catch {
+            await MainActor.run {
+                self.errorMessage = (error as NSError).localizedDescription
+            }
+        }
     }
 
     private func startListening() {
@@ -236,17 +320,28 @@ extension ChatViewModel: SpeechRecognitionServiceDelegate {
     func speechService(_ svc: SpeechRecognitionService, didFinishWith text: String) {
         isListening = false
         partialTranscript = nil
+        withAnimation(.easeInOut(duration: 0.3)) {
+            isHotkeyCaptureActive = false
+        }
         Task { await sendTranscribedText(text) }
     }
 
     func speechService(_ svc: SpeechRecognitionService, didFail error: Error) {
         isListening = false
         partialTranscript = nil
+        withAnimation(.easeInOut(duration: 0.3)) {
+            isHotkeyCaptureActive = false
+        }
         errorMessage = (error as NSError).localizedDescription
     }
 
     func speechServiceDidChangeState(_ svc: SpeechRecognitionService, isRunning: Bool) {
         isListening = isRunning
+        if isRunning == false {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                isHotkeyCaptureActive = false
+            }
+        }
     }
 }
 

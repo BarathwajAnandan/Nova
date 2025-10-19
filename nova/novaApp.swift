@@ -10,26 +10,31 @@ import SwiftUI
 @main
 struct novaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var vm = ChatViewModel()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(vm)
+                .environmentObject(appDelegate.sharedViewModel)
         }
         .windowStyle(.automatic)
         .commands {
             CommandMenu("Nova") {
                 Button("Capture Selection") {
-                    vm.captureSelection()
+                    appDelegate.sharedViewModel.captureSelection()
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
 
-                Divider()
-
-                Button("Toggle Nova") {
-                    AppVisibilityController.shared.toggle()
+                Button("Start Voice Capture") {
+                    appDelegate.sharedViewModel.handleGlobalHotkeyPress()
                 }
                 .keyboardShortcut("n", modifiers: [.command, .option])
+
+                Divider()
+
+                Button("Toggle Nova Visibility") {
+                    AppVisibilityController.shared.toggle()
+                }
+                .keyboardShortcut("m", modifiers: [.command, .option])
             }
         }
 

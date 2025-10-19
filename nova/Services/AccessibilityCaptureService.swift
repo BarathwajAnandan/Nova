@@ -59,8 +59,13 @@ final class AccessibilityCaptureService {
         onCapture?(clipped)
     }
 
-    private func isTrustedOrPrompt() -> Bool {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+    private func isTrustedOrPrompt(promptIfNeeded: Bool = true) -> Bool {
+        let options: CFDictionary
+        if promptIfNeeded {
+            options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        } else {
+            options = [:] as CFDictionary
+        }
         return AXIsProcessTrustedWithOptions(options)
     }
 
@@ -206,9 +211,60 @@ final class AccessibilityCaptureService {
     }
 }
 
-
-
 extension AccessibilityCaptureService {
+    struct Snapshot {
+        let contextText: String?
+        let screenshot: NSImage?
+        let app: RecognizedApp?
+    }
+
+    enum SnapshotError: Error {
+        case permissionDenied
+    }
+
+    func captureFrontmostSnapshot() async throws -> Snapshot {
+        guard isTrustedOrPrompt(promptIfNeeded: false) else {
+            throw SnapshotError.permissionDenied
+        }
+
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else {
+            return Snapshot(contextText: nil, screenshot: nil, app: nil)
+        }
+
+        let myBundle = Bundle.main.bundleIdentifier
+        let isSelf = (myBundle != nil && frontApp.bundleIdentifier == myBundle)
+
+        let context = captureFrontmostWindowText()
+
+        let appSnapshot: RecognizedApp?
+        if isSelf {
+            appSnapshot = lastNonSelfAppSnapshot
+        } else {
+            let name = frontApp.localizedName ?? (frontApp.bundleIdentifier ?? String(frontApp.processIdentifier))
+            var icon: NSImage? = nil
+            if let url = frontApp.bundleURL {
+                icon = NSWorkspace.shared.icon(forFile: url.path)
+            }
+            appSnapshot = RecognizedApp(name: name, icon: icon)
+        }
+
+        let screenshot = await captureFrontmostScreenshot(pid: frontApp.processIdentifier)
+        return Snapshot(contextText: context, screenshot: screenshot, app: appSnapshot)
+    }
+
+    private func captureFrontmostScreenshot(pid: pid_t) async -> NSImage? {
+        await withCheckedContinuation { continuation in
+            Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let image = await self.captureFocusedWindowScreenshot(pid: pid)
+                continuation.resume(returning: image)
+            }
+        }
+    }
+
     // MARK: - Screen recording permission
     private func ensureScreenRecordingPermission() -> Bool {
         if CGPreflightScreenCaptureAccess() { return true }

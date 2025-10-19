@@ -30,7 +30,9 @@ final class AppVisibilityController {
 
     func ensureIconWindow() {
         if iconWC == nil {
-            let vm = (NSApp.delegate as? AppDelegate)?.sharedViewModel ?? ChatViewModel()
+            guard let vm = (NSApp.delegate as? AppDelegate)?.sharedViewModel else {
+                return
+            }
 
             iconWC = FloatingIconWindowController(
                 viewModel: vm,

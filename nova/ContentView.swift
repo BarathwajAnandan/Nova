@@ -22,8 +22,10 @@ struct ContentView: View {
         .background(Color(nsColor: .textBackgroundColor))
         // Attach the window accessor invisibly so it doesn't affect layout
         .background(WindowAccessor().frame(width: 0, height: 0))
-        .onAppear {
-            (NSApp.delegate as? AppDelegate)?.sharedViewModel = vm
+        .overlay(alignment: .top) {
+            SpeechCaptureOverlay(isVisible: vm.isHotkeyCaptureActive || vm.isListening,
+                                 partialText: vm.partialTranscript,
+                                 app: vm.recognizedApp)
         }
     }
 
@@ -246,6 +248,109 @@ private struct EmptyState: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.bottom, 12)
+    }
+}
+
+private struct SpeechCaptureOverlay: View {
+    let isVisible: Bool
+    let partialText: String?
+    let app: RecognizedApp?
+
+    @State private var display: Bool = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            VStack(alignment: .leading, spacing: 12) {
+                overlayContent
+            }
+            .padding(18)
+            .frame(maxWidth: min(proxy.size.width - 32, 520))
+            .background(.ultraThinMaterial.opacity(0.85))
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.black.opacity(0.55))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.25), radius: 12, x: 0, y: 12)
+            .offset(y: display ? 34 : -140)
+            .opacity(display ? 1 : 0)
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
+        .allowsHitTesting(false)
+        .frame(height: 0)
+        .onChange(of: isVisible) { visible in
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.82, blendDuration: 0.2)) {
+                display = visible
+            }
+        }
+        .onAppear {
+            display = false
+            if isVisible {
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.82, blendDuration: 0.2)) {
+                    display = true
+                }
+            }
+        }
+    }
+
+    private var overlayContent: some View {
+        HStack(spacing: 10) {
+            if let icon = app?.icon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 26, height: 26)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            } else {
+                Image(systemName: "mic.circle.fill")
+                    .font(.system(size: 24, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(app?.name ?? "Listening…")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                if let partial = partialText, partial.isEmpty == false {
+                    Text(partial)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(2)
+                } else {
+                    Text("Speak now, Nova is capturing context")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+            }
+            Spacer()
+            ListeningPill()
+        }
+    }
+}
+
+private struct ListeningPill: View {
+    @State private var showPulse: Bool = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(Color.red.opacity(0.85))
+                .frame(width: 10, height: 10)
+                .scaleEffect(showPulse ? 1.3 : 0.9)
+                .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: showPulse)
+            Text("Listening")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.9))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(0.12))
+        )
+        .onAppear { showPulse = true }
     }
 }
 
