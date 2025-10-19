@@ -23,22 +23,41 @@ final class BackendClient {
     private static let baseURL = URL(string: "http://10.0.0.138:8000")!
     private static let appName = "multi_tool_agent"
     private static let userId = "u"
-    private static let sessionId: String = UUID().uuidString
-    private let sessionCreationTask: Task<Void, Error>
+    private static var sessionId: String = UUID().uuidString
+    private static let sessionQueue = DispatchQueue(label: "nova.backendclient.session")
+    private static var sessionTask: Task<Void, Error>?
+
     private let decoder = JSONDecoder()
 
     init() {
-        sessionCreationTask = Task {
-            try await BackendClient.createSessionIfNeeded(
-                baseURL: BackendClient.baseURL,
-                appName: BackendClient.appName,
-                userId: BackendClient.userId,
-                sessionId: BackendClient.sessionId
-            )
+        Task {
+            try await BackendClient.ensureSession()
         }
     }
 
-    private static func createSessionIfNeeded(baseURL: URL, appName: String, userId: String, sessionId: String) async throws {
+    static func ensureSession() async throws {
+        let task: Task<Void, Error> = sessionQueue.sync {
+            if let existing = sessionTask, existing.isCancelled == false {
+                return existing
+            }
+
+            sessionId = UUID().uuidString
+            let newTask = Task {
+                try await createSession(
+                    baseURL: baseURL,
+                    appName: appName,
+                    userId: userId,
+                    sessionId: sessionId
+                )
+            }
+            sessionTask = newTask
+            return newTask
+        }
+
+        try await task.value
+    }
+
+    private static func createSession(baseURL: URL, appName: String, userId: String, sessionId: String) async throws {
         struct SessionPayload: Encodable {
             struct State: Encodable {
                 let key1: String
@@ -65,7 +84,7 @@ final class BackendClient {
     }
 
     func sendMessage(text: String, inlineImageData: Data?, mimeType: String?, hiddenContext: String?) async throws -> String {
-        _ = try await sessionCreationTask.value
+        try await BackendClient.ensureSession()
 
         struct InlineData: Encodable {
             let mimeType: String
@@ -89,8 +108,8 @@ final class BackendClient {
 
         var parts: [Part] = []
         parts.append(Part(text: text, inlineData: nil))
-        if let ctx = hiddenContext, ctx.isEmpty == false {
-            parts.append(Part(text: "Selection context:\n" + ctx, inlineData: nil))
+        if let ctxRaw = hiddenContext?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines), ctxRaw.isEmpty == false {
+            parts.append(Part(text: "<context>" + ctxRaw + "</context>", inlineData: nil))
         }
         if let data = inlineImageData, let type = mimeType {
             parts.append(Part(text: nil, inlineData: InlineData(mimeType: type, data: data.base64EncodedString())))
@@ -110,19 +129,107 @@ final class BackendClient {
         request.timeoutInterval = 60
         request.httpBody = try JSONEncoder().encode(payload)
 
+        if let body = request.httpBody,
+           var json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+            if var newMessage = json["newMessage"] as? [String: Any],
+               var parts = newMessage["parts"] as? [[String: Any]] {
+                for idx in parts.indices {
+                    if var inlineData = parts[idx]["inlineData"] as? [String: Any], inlineData["data"] != nil {
+                        inlineData["data"] = "value..."
+                        parts[idx]["inlineData"] = inlineData
+                    }
+                }
+                newMessage["parts"] = parts
+                json["newMessage"] = newMessage
+            }
+
+            if let sanitizedData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]),
+               let bodyString = String(data: sanitizedData, encoding: .utf8) {
+                print("Sending request to \(request.url?.absoluteString ?? "<unknown>"):\n\(bodyString)")
+            }
+        }
+
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw NSError(domain: "BackendClient", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: "Server error"])
         }
 
-        let raw = String(data: data, encoding: .utf8) ?? ""
-        let trimmed = raw.hasPrefix("data: ") ? String(raw.dropFirst(6)) : raw
-        guard let jsonData = trimmed.data(using: .utf8) else {
-            throw NSError(domain: "BackendClient", code: -2, userInfo: [NSLocalizedDescriptionKey: "Invalid response encoding"])
+        let rawString = String(data: data, encoding: .utf8) ?? ""
+        print("Received response (status: \(http.statusCode)):\n\(rawString)")
+
+        let payloads = extractPayloads(from: rawString)
+        var textFragments: [String] = []
+        var decodeError: Error?
+
+        for payload in payloads {
+            guard let payloadData = payload.data(using: .utf8) else { continue }
+            do {
+                let response = try decoder.decode(BackendResponse.self, from: payloadData)
+                let text = response.text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                if text.isEmpty == false {
+                    textFragments.append(text)
+                }
+            } catch {
+                decodeError = error
+                print("Failed to decode backend payload: \(payload)\nError: \(error)")
+            }
         }
 
-        let decoded = try decoder.decode(BackendResponse.self, from: jsonData)
-        return decoded.text
+        if let finalText = textFragments.last ?? textFragments.first {
+            return finalText
+        }
+
+        if let error = decodeError {
+            throw error
+        }
+
+        throw NSError(domain: "BackendClient", code: -2, userInfo: [NSLocalizedDescriptionKey: "Invalid response encoding"])
+    }
+}
+
+private extension BackendClient {
+    func extractPayloads(from raw: String) -> [String] {
+        var payloads: [String] = []
+        var buffer = ""
+
+        let lines = raw.split(maxSplits: Int.max, omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+
+        for lineSubstring in lines {
+            let line = String(lineSubstring)
+            let trimmedLine = line.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+
+            if trimmedLine.isEmpty {
+                if buffer.isEmpty == false {
+                    payloads.append(buffer)
+                    buffer.removeAll(keepingCapacity: true)
+                }
+                continue
+            }
+
+            if trimmedLine.hasPrefix("data:") {
+                let dataStart = trimmedLine.index(trimmedLine.startIndex, offsetBy: 5)
+                let dataPayload = trimmedLine[dataStart...].trimmingCharacters(in: CharacterSet.whitespaces)
+                guard dataPayload != "[DONE]" else { continue }
+
+                if buffer.isEmpty == false {
+                    buffer.append("\n")
+                }
+                buffer.append(dataPayload)
+            } else if trimmedLine.hasPrefix("event:") || trimmedLine.hasPrefix("id:") || trimmedLine == "[DONE]" {
+                continue
+            } else {
+                if buffer.isEmpty == false {
+                    buffer.append("\n")
+                }
+                buffer.append(trimmedLine)
+            }
+        }
+
+        if buffer.isEmpty == false {
+            payloads.append(buffer)
+        }
+
+        return payloads
     }
 }
 

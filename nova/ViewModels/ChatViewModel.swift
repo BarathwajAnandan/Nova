@@ -186,24 +186,37 @@ final class ChatViewModel: ObservableObject {
         guard let png = bitmap.representation(using: .png, properties: [:]) else { return nil }
 
         let fm = FileManager.default
-        let picturesDir = (fm.urls(for: .picturesDirectory, in: .userDomainMask).first ?? fm.temporaryDirectory)
-        let targetDir = picturesDir.appendingPathComponent("Nova", isDirectory: true)
-        do {
-            try fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
-        } catch {
-            // Fallback to temporary directory if we cannot create Pictures/Nova
-            let tempURL = fm.temporaryDirectory.appendingPathComponent("nova_screenshot_\(Int(Date().timeIntervalSince1970)).png")
-            do { try png.write(to: tempURL) } catch { return nil }
-            return tempURL
+        let baseSupportDir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fm.temporaryDirectory
+        let targetDir = baseSupportDir.appendingPathComponent("Nova/Screenshots", isDirectory: true)
+
+        let makeDirectory: () -> URL? = {
+            do {
+                try fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
+                return targetDir
+            } catch {
+                print("Failed to create screenshot directory: \(error.localizedDescription)")
+                return nil
+            }
         }
 
-        let filename = "screenshot_\(Int(Date().timeIntervalSince1970)).png"
-        let fileURL = targetDir.appendingPathComponent(filename)
+        let resolvedDir = makeDirectory() ?? fm.temporaryDirectory
+        let timestamp = Int(Date().timeIntervalSince1970)
+        let filename = "screenshot_\(timestamp).png"
+        let fileURL = resolvedDir.appendingPathComponent(filename)
+
         do {
-            try png.write(to: fileURL)
+            try png.write(to: fileURL, options: .atomic)
             return fileURL
         } catch {
-            return nil
+            print("Failed to write screenshot to \(fileURL.path): \(error.localizedDescription)")
+            let fallbackURL = fm.temporaryDirectory.appendingPathComponent("nova_screenshot_\(timestamp).png")
+            do {
+                try png.write(to: fallbackURL, options: .atomic)
+                return fallbackURL
+            } catch {
+                print("Failed to write screenshot to temporary directory: \(error.localizedDescription)")
+                return nil
+            }
         }
     }
 

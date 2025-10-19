@@ -11,6 +11,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Defer to next runloop to allow SwiftUI to create the main window before changing state
             AppVisibilityController.shared.startupRespectingSettings()
         }
+
+        Task(priority: .userInitiated) {
+            do {
+                try await BackendClient.ensureSession()
+            } catch {
+                print("Failed to create backend session on launch: \(error.localizedDescription)")
+            }
+        }
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(handleScreenConfigChanged),
                                                name: NSApplication.didChangeScreenParametersNotification,
