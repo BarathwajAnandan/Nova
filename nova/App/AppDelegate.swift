@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                object: nil)
 
         registerGlobalHotkey()
+        ScreenSnippingService.shared.startMonitoring()
     }
 
     @objc private func handleScreenConfigChanged() {
@@ -52,16 +53,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Four-character code 'NVAC'
         let signature: OSType = FourCharCode("NVAC")
         let hotKeyID = EventHotKeyID(signature: signature, id: UInt32(1))
-        let modifierFlags = UInt32(cmdKey | optionKey)
+        let modifierFlags = UInt32(optionKey)
 
         let target = GetApplicationEventTarget()
-        let status = RegisterEventHotKey(UInt32(kVK_ANSI_N), modifierFlags, hotKeyID, target, 0, &hotKeyRef)
+        let status = RegisterEventHotKey(UInt32(kVK_ANSI_X), modifierFlags, hotKeyID, target, 0, &hotKeyRef)
 
         if status != noErr {
-            print("Failed to register global hotkey ⌘⌥N: \(status)")
+            print("Failed to register global hotkey ⌥X: \(status)")
             return
         } else {
-            print("Registered global hotkey ⌘⌥N")
+            print("Registered global hotkey ⌥X")
         }
 
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
@@ -85,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var hotKeyID = EventHotKeyID()
         let err = GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &hotKeyID)
         if err == noErr {
-            print("Hotkey ⌘⌥N pressed (id: \(hotKeyID.id))")
+            print("Hotkey ⌥X pressed (id: \(hotKeyID.id))")
             DispatchQueue.main.async { [weak self] in
                 self?.sharedViewModel.handleGlobalHotkeyPress()
             }
@@ -104,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hotKeyEventHandler = nil
         }
         hotKeyCallback = nil
+        ScreenSnippingService.shared.stopMonitoring()
     }
 }
 

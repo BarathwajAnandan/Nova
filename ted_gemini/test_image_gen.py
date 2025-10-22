@@ -12,8 +12,13 @@ except ImportError:
     print("Install with: pip install google-genai")
     sys.exit(1)
 
-# API key
-API_KEY = "AIzaSyDlvjAwqVLi5wvjb0oo8f_66-eByVWmfdc"
+# API key from environment variable
+API_KEY = os.getenv("GOOGLE_API_KEY")
+if not API_KEY:
+    print("Error: GOOGLE_API_KEY environment variable not set")
+    print("Please set it with: export GOOGLE_API_KEY='your-api-key'")
+    sys.exit(1)
+
 MODEL = "gemini-2.5-flash-image-preview"
 
 def test_image_generation():

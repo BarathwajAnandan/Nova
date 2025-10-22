@@ -6,3 +6,6 @@
 **/.vscode
 **/.pytest_cache
 **/.pytest_cache
+
+**./.env
+ted_gemini/app/.env

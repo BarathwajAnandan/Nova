@@ -1,4 +1,4 @@
-Sample Notes File
+sSample Notes File
 ==================
 
 This is a sample file in the workspace directory.

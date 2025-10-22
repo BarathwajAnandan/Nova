@@ -27,7 +27,7 @@ struct novaApp: App {
                 Button("Start Voice Capture") {
                     appDelegate.sharedViewModel.handleGlobalHotkeyPress()
                 }
-                .keyboardShortcut("n", modifiers: [.command, .option])
+                .keyboardShortcut("x", modifiers: [.option])
 
                 Divider()
 

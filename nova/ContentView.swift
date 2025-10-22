@@ -89,6 +89,8 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .help(vm.isMuted ? "Unmute voice responses" : "Mute voice responses")
             
+            ImageGenButton()
+            
             if vm.isStreaming { ProgressView().controlSize(.small) }
             if vm.isSpeaking {
                 Button(action: { vm.stopSpeaking() }) {
@@ -390,6 +392,23 @@ private struct ListeningPill: View {
                 .fill(Color.white.opacity(0.12))
         )
         .onAppear { showPulse = true }
+    }
+}
+
+private struct ImageGenButton: View {
+    @State private var showPopover = false
+    
+    var body: some View {
+        Button(action: { showPopover.toggle() }) {
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: 14, weight: .regular))
+                .frame(width: 20, height: 20)
+        }
+        .buttonStyle(.plain)
+        .help("Generate image from screen clip (Option+C to capture)")
+        .popover(isPresented: $showPopover, arrowEdge: .bottom) {
+            ImageGenerationView()
+        }
     }
 }
 
